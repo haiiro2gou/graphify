@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # The ~/.claude volume comes up root-owned on first use.
-# Only the volume root: -R would hit the bind mount inside it.
+# Only the volume root: -R would hit any bind mount layered inside it.
 sudo chown "$(id -u):$(id -g)" "$HOME/.claude"
 
 # The feature installs /usr/bin/claude as root; self-update expects ~/.local/bin/claude.
