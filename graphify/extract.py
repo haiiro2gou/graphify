@@ -6562,7 +6562,7 @@ def _get_extractor(path: Path) -> Any | None:
         return extract_mcp_config
     # Datapack function tags (data/<ns>/tags/function(s)/*.json) list the
     # functions a `function #ns:tag` call runs; generic JSON would drop them.
-    if is_function_tag_path(path):
+    if is_function_tag_path(path) or path.name == ".mcfunction":
         return extract_mcfunction
     # Package manifests (apm.yml, pyproject.toml, go.mod, pom.xml) → a canonical
     # package node + depends_on edges, by filename before generic suffix dispatch

@@ -522,6 +522,14 @@ def classify_file(path: Path) -> FileType | None:
     # Compound extensions must be checked before simple suffix lookup
     if path.name.lower().endswith(".blade.php"):
         return FileType.CODE
+    # A datapack's `<dir>/.mcfunction` is the `ns:dir/` function and
+    # `tags/function(s)/<dir>/.json` the `#ns:dir/` tag; Path.suffix is '' for both.
+    if path.name == ".mcfunction":
+        return FileType.CODE
+    if path.name == ".json":
+        from graphify.extractors.mcfunction import is_function_tag_path
+        if is_function_tag_path(path):
+            return FileType.CODE
     ext = path.suffix.lower()
     if not ext:
         return _shebang_file_type(path)
@@ -987,8 +995,21 @@ def _has_venv_markers(d: "Path") -> bool:
     return False
 
 
+def _in_datapack_functions(path: Path) -> bool:
+    """True if path is at or below a datapack's data/<ns>/function(s)/ dir."""
+    parts = path.parts
+    return any(
+        parts[i] == "data" and parts[i + 2] in ("function", "functions")
+        for i in range(len(parts) - 2)
+    )
+
+
 def _is_noise_dir(part: str, parent: "Path | None" = None) -> bool:
     """Return True if this directory name looks like a venv, cache, or dep dir."""
+    # Inside a datapack's data/<ns>/function(s)/ every directory is part of a
+    # function path (e.g. `ns:grave/build/...`), never build output.
+    if parent is not None and _in_datapack_functions(parent):
+        return False
     if part in _SKIP_DIRS:
         return True
     if part in ("env", ".env") or part.endswith("_env"):

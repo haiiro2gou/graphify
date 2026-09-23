@@ -1,6 +1,7 @@
 """Minecraft datapack function and function-tag extractor (regex and stdlib JSON)."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 
@@ -12,11 +13,24 @@ _CALL_RE = re.compile(r"(?<!\S)(?:(?P<schedule>schedule)\s+)?function\s+(?P<ref>
 _RESOURCE_RE = re.compile(r"(?:[a-z0-9_.-]+:)?[a-z0-9_./-]+")
 
 
+def _resource_id(kind: str, name: str) -> str:
+    """Node ID for a function or tag resource name.
+
+    make_id collapses every run of '/', '.', '_' and trims them at the ends, so
+    a:b/_/c and a:b/c, or a:dir/ (dir/.mcfunction) and a:dir, would share an
+    ID. The hash of the exact name keeps them apart while the prefix stays
+    readable.
+    """
+    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+    return _make_id(kind, name, digest)
+
+
 def _resource_name(path: Path, tag: bool = False) -> str | None:
     """Resolve a resource from the last matching datapack data directory."""
     parts = path.parts
     suffix = ".json" if tag else ".mcfunction"
-    if path.suffix != suffix:
+    # endswith, not suffix: `<dir>/.mcfunction` (the `ns:dir/` function) has no suffix.
+    if not path.name.endswith(suffix):
         return None
     for i in range(len(parts) - 1, -1, -1):
         if parts[i] != "data":
@@ -48,8 +62,7 @@ def _reference_id(reference: str) -> str | None:
         return None
     if ":" not in name:
         name = f"minecraft:{name}"
-    # ponytail: ID-normalization ceiling: a:b_c and a:b/c collide via _make_id.
-    return _make_id("mcfunction_tag" if tag else "mcfunction", name)
+    return _resource_id("mcfunction_tag" if tag else "mcfunction", name)
 
 
 def extract_mcfunction(path: Path) -> dict:
@@ -90,9 +103,15 @@ def extract_mcfunction(path: Path) -> dict:
             "source_location": f"L{line}", "weight": 1.0, "context": context,
         })
 
-    file_nid = (_make_id("mcfunction_tag" if tag else "mcfunction", name)
+    file_nid = (_resource_id("mcfunction_tag" if tag else "mcfunction", name)
                 if name else _make_id(str_path))
     add_node(file_nid, ("#" if tag else "") + name if name else path.name)
+    if tag and name:
+        # Minecraft merges same-named tags from every datapack into one tag.
+        # The builder salts colliding ids apart per file unless the node is a
+        # shared anchor (type module/namespace), which would strand the
+        # `function #ns:tag` calls that target the unsalted id.
+        nodes[0]["type"] = "namespace"
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
         if name is None:
