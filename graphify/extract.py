@@ -52,6 +52,7 @@ from graphify.extractors.go import _GO_PREDECLARED_FUNCS, extract_go  # noqa: F4
 from graphify.extractors.json_config import extract_json  # noqa: F401
 from graphify.extractors.commonlisp import extract_commonlisp  # noqa: F401
 from graphify.extractors.markdown import extract_markdown, _MD_LINK_INDEX_CACHE  # noqa: F401
+from graphify.extractors.mcfunction import extract_mcfunction, is_function_tag_path  # noqa: F401
 from graphify.extractors.ocaml import extract_ocaml  # noqa: F401
 from graphify.extractors.pascal_forms import extract_delphi_form, extract_lazarus_form  # noqa: F401
 from graphify.extractors.powershell import extract_powershell, extract_powershell_manifest  # noqa: F401
@@ -2788,6 +2789,7 @@ _LANG_FAMILY_BY_EXT: dict[str, str] = {
     ".dart": "dart",
     ".sh": "shell", ".bash": "shell",
     ".ps1": "powershell", ".psm1": "powershell", ".psd1": "powershell",
+    ".mcfunction": "mcfunction",
 }
 
 
@@ -6410,6 +6412,7 @@ _DISPATCH: dict[str, Any] = {
     ".cshtml": extract_razor,
     ".robot": extract_robot,
     ".resource": extract_robot,
+    ".mcfunction": extract_mcfunction,
     ".cls": extract_apex,
     ".trigger": extract_apex,
 }
@@ -6557,6 +6560,10 @@ def _get_extractor(path: Path) -> Any | None:
     # (servers, commands, packages, env vars) instead of opaque JSON keys.
     if is_mcp_config_path(path):
         return extract_mcp_config
+    # Datapack function tags (data/<ns>/tags/function(s)/*.json) list the
+    # functions a `function #ns:tag` call runs; generic JSON would drop them.
+    if is_function_tag_path(path):
+        return extract_mcfunction
     # Package manifests (apm.yml, pyproject.toml, go.mod, pom.xml) → a canonical
     # package node + depends_on edges, by filename before generic suffix dispatch
     # (#1377). apm.yml would otherwise be a .yml document handled by the LLM.
