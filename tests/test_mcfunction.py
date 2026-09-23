@@ -5,7 +5,7 @@ import json
 import pytest
 
 from graphify.extractors.base import _make_id
-from graphify.extractors.mcfunction import extract_mcfunction, is_function_tag_path
+from graphify.extractors.mcfunction import _resource_id, extract_mcfunction, is_function_tag_path
 
 
 def _write(root: Path, relative: str, text: str) -> Path:
@@ -22,7 +22,7 @@ def test_function_node_and_cross_file_calls(tmp_path: Path, directory: str):
     target = _write(tmp_path, f"data/demo/{directory}/finish.mcfunction", "")
     result = extract_mcfunction(caller)
     assert result["nodes"] == [{
-        "id": _make_id("mcfunction", "demo:nested/start"),
+        "id": _resource_id("mcfunction", "demo:nested/start"),
         "label": "demo:nested/start", "file_type": "code",
         "source_file": str(caller), "source_location": "L1",
     }]
@@ -54,7 +54,7 @@ def test_call_forms(tmp_path: Path, command: str, reference: str, context: str):
     assert "error" not in result
     assert len(result["edges"]) == 1
     edge = result["edges"][0]
-    assert edge["target"] == _make_id("mcfunction", reference)
+    assert edge["target"] == _resource_id("mcfunction", reference)
     assert edge["source_location"] == "L2"
     assert edge["context"] == context
 
@@ -71,9 +71,9 @@ def test_skips_comments_dynamic_references_self_calls_and_duplicates(tmp_path: P
     result = extract_mcfunction(path)
     assert len(result["nodes"]) == 1
     assert [(e["target"], e["context"], e["source_location"]) for e in result["edges"]] == [
-        (_make_id("mcfunction", "a:once"), "schedule", "L7"),
-        (_make_id("mcfunction", "a:condition"), "call", "L11"),
-        (_make_id("mcfunction", "a:body"), "call", "L11"),
+        (_resource_id("mcfunction", "a:once"), "schedule", "L7"),
+        (_resource_id("mcfunction", "a:condition"), "call", "L11"),
+        (_resource_id("mcfunction", "a:body"), "call", "L11"),
     ]
     assert extract_mcfunction(path) == result
 
@@ -90,14 +90,14 @@ def test_function_tags(tmp_path: Path, directory: str):
     result = extract_mcfunction(tag)
     assert "error" not in result
     assert result["nodes"] == [{
-        "id": _make_id("mcfunction_tag", "demo:nested/tick"),
+        "id": _resource_id("mcfunction_tag", "demo:nested/tick"),
         "label": "#demo:nested/tick", "file_type": "code",
-        "source_file": str(tag), "source_location": "L1",
+        "source_file": str(tag), "source_location": "L1", "type": "namespace",
     }]
     assert [e["target"] for e in result["edges"]] == [
-        _make_id("mcfunction", "demo:start"), _make_id("mcfunction", "minecraft:bare"),
-        _make_id("mcfunction_tag", "demo:other"),
-        _make_id("mcfunction_tag", "minecraft:default"),
+        _resource_id("mcfunction", "demo:start"), _resource_id("mcfunction", "minecraft:bare"),
+        _resource_id("mcfunction_tag", "demo:other"),
+        _resource_id("mcfunction_tag", "minecraft:default"),
     ]
     assert all(e["context"] == "tag" and e["relation"] == "calls"
                and e["source_location"] == "L1" for e in result["edges"])
@@ -105,7 +105,7 @@ def test_function_tags(tmp_path: Path, directory: str):
                     "function #demo:nested/tick\nschedule function #default 1t")
     edges = extract_mcfunction(caller)["edges"]
     assert edges[0]["target"] == result["nodes"][0]["id"]
-    assert edges[1]["target"] == _make_id("mcfunction_tag", "minecraft:default")
+    assert edges[1]["target"] == _resource_id("mcfunction_tag", "minecraft:default")
     assert edges[1]["context"] == "schedule"
 
 
@@ -144,7 +144,7 @@ def test_invalid_tag_preserves_node(tmp_path: Path, text: str):
     result = extract_mcfunction(path)
     assert result["error"]
     assert len(result["nodes"]) == 1
-    assert result["nodes"][0]["id"] == _make_id("mcfunction_tag", "demo:tick")
+    assert result["nodes"][0]["id"] == _resource_id("mcfunction_tag", "demo:tick")
     assert result["edges"] == []
 
 
@@ -158,7 +158,7 @@ def test_read_error_and_utf8_replacement(tmp_path: Path):
     path.write_bytes(b"# invalid \xff\nfunction demo:target\n")
     result = extract_mcfunction(path)
     assert "error" not in result
-    assert result["edges"][0]["target"] == _make_id("mcfunction", "demo:target")
+    assert result["edges"][0]["target"] == _resource_id("mcfunction", "demo:target")
 
 
 def test_dispatch_routes_functions_and_tags(tmp_path: Path):
@@ -170,3 +170,54 @@ def test_dispatch_routes_functions_and_tags(tmp_path: Path):
     assert classify_file(function) == FileType.CODE
     assert _get_extractor(function) is extract_mcfunction
     assert _get_extractor(tag) is extract_mcfunction
+
+
+def test_directory_index_function(tmp_path: Path):
+    from graphify.detect import FileType, classify_file
+    from graphify.extract import _get_extractor
+
+    index = _write(tmp_path, "data/ns/function/area/.mcfunction", "function ns:area\n")
+    assert classify_file(index) == FileType.CODE
+    assert _get_extractor(index) is extract_mcfunction
+    result = extract_mcfunction(index)
+    assert result["nodes"][0]["label"] == "ns:area/"
+    assert result["nodes"][0]["id"] == _resource_id("mcfunction", "ns:area/")
+    assert result["edges"][0]["target"] == _resource_id("mcfunction", "ns:area")
+
+    tag = _write(tmp_path, "data/ns/tags/function/area/.json", '{"values": ["ns:area/"]}')
+    assert classify_file(tag) == FileType.CODE
+    assert _get_extractor(tag) is extract_mcfunction
+    assert extract_mcfunction(tag)["nodes"][0]["label"] == "#ns:area/"
+
+
+def test_resource_ids_do_not_collide():
+    names = ["a:dir/", "a:dir", "a:b/_/c", "a:b/c", "a:b_c", "a:b.c"]
+    assert len({_resource_id("mcfunction", n) for n in names}) == len(names)
+
+
+def test_build_dir_inside_functions_is_scanned(tmp_path: Path):
+    from graphify.detect import detect
+
+    kept = _write(tmp_path, "data/ns/function/grave/build/m.mcfunction", "say hi\n")
+    _write(tmp_path, "build/out.py", "x = 1\n")
+    code = [str(p) for p in detect(tmp_path)["files"]["code"]]
+    assert str(kept) in code
+    assert not any(p.endswith("out.py") for p in code)
+
+
+def test_same_tag_in_two_packs_is_one_node(tmp_path: Path):
+    from graphify.extract import extract
+
+    caller = _write(tmp_path, "a/data/ns/function/run.mcfunction", "function #minecraft:load\n")
+    tags = [
+        _write(tmp_path, f"{pack}/data/minecraft/tags/function/load.json",
+               json.dumps({"values": [f"ns:{pack}"]}))
+        for pack in ("a", "b")
+    ]
+    targets = [_write(tmp_path, f"a/data/ns/function/{pack}.mcfunction", "say hi\n") for pack in ("a", "b")]
+    result = extract([caller, *tags, *targets])
+    tag_id = _resource_id("mcfunction_tag", "minecraft:load")
+    assert [n["id"] for n in result["nodes"] if n["label"] == "#minecraft:load"] == [tag_id]
+    pairs = {(e["source"], e["target"]) for e in result["edges"]}
+    assert (_resource_id("mcfunction", "ns:run"), tag_id) in pairs
+    assert {(tag_id, _resource_id("mcfunction", f"ns:{pack}")) for pack in ("a", "b")} <= pairs
