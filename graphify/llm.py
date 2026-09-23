@@ -3151,6 +3151,7 @@ _BACKEND_DETECTION_EXTRA_ENV = (
     "AZURE_OPENAI_ENDPOINT",
     "AWS_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION",
     "OLLAMA_BASE_URL", "OLLAMA_HOST",
+    "GRAPHIFY_BACKEND",
 )
 
 
@@ -3172,7 +3173,8 @@ def backend_detection_env_vars() -> tuple[str, ...]:
 def detect_backend() -> str | None:
     """Return the name of whichever backend has an API key set, or None.
 
-    Priority: gemini → kimi → claude → openai → deepseek → azure → bedrock → ollama (last, opt-in).
+    Priority: gemini → kimi → claude → openai → deepseek → azure → bedrock → ollama (opt-in)
+    → custom providers → $GRAPHIFY_BACKEND (fallback default, e.g. ``claude-cli``).
 
     Ollama is intentionally checked LAST so a paid API key (Anthropic/OpenAI/etc.)
     is never silently shadowed by an incidental OLLAMA_BASE_URL in the environment
@@ -3199,7 +3201,10 @@ def detect_backend() -> str | None:
         if name not in ("gemini", "kimi", "claude", "openai", "deepseek", "azure", "bedrock", "ollama", "claude-cli"):
             if _get_backend_api_key(name):
                 return name
-    return None
+    # Keyless backends (e.g. claude-cli) are never auto-detected; GRAPHIFY_BACKEND
+    # names the default when nothing above matched. Unknown names are rejected
+    # by the callers' BACKENDS check, same as an unknown --backend.
+    return os.environ.get("GRAPHIFY_BACKEND") or None
 
 
 def _claude_cli_available() -> bool:

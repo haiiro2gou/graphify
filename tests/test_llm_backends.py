@@ -987,6 +987,21 @@ def test_detect_backend_azure_requires_endpoint_not_just_key(monkeypatch):
     assert llm.detect_backend() != "azure"
 
 
+def test_detect_backend_falls_back_to_graphify_backend_env(monkeypatch):
+    _clear_backend_env(monkeypatch)
+    monkeypatch.setenv("GRAPHIFY_BACKEND", "claude-cli")
+
+    assert llm.detect_backend() == "claude-cli"
+
+
+def test_detect_backend_api_key_beats_graphify_backend_env(monkeypatch):
+    _clear_backend_env(monkeypatch)
+    monkeypatch.setenv("GRAPHIFY_BACKEND", "claude-cli")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    assert llm.detect_backend() == "claude"
+
+
 def test_estimate_cost_azure_no_keyerror():
     cost = llm.estimate_cost("azure", 1_000_000, 500_000)
     assert cost == pytest.approx(2.50 + 5.00)  # 1M in * $2.50/M + 0.5M out * $10.00/M
