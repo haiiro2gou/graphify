@@ -7,14 +7,7 @@
   },
   "remoteUser": "vscode",
   "mounts": [
-    "source=graphify-claude-config,target=/home/vscode/.claude,type=volume",
-    // Not ~/.claude.json: the host rewrites it by rename, leaving a single-file bind mount stale.
-    "source=${localEnv:HOME}/.claude/.credentials.json,target=/home/vscode/.claude/.credentials.json,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/workspace/agent/obsidian-claude/dotfiles,target=/home/vscode/.dotfiles-src,type=bind,consistency=cached,readonly",
-    // A worktree's .git file points at the main checkout's .git by host path (git show in tests).
-    "source=${localEnv:HOME}/workspace/agent/graphify/.git,target=${localEnv:HOME}/workspace/agent/graphify/.git,type=bind,consistency=cached,readonly",
-    // Target repo for `graphify update .`; graphify-out/ is written back to the host.
-    "source=${localEnv:HOME}/workspace/the-sky-blessing/TheSkyBlessing,target=/workspaces/TheSkyBlessing,type=bind,consistency=cached"
+    "source=graphify-claude-config,target=/home/vscode/.claude,type=volume"
   ],
   // Keep the venv off the bind-mounted source tree so the host checkout stays clean.
   "containerEnv": {
@@ -23,6 +16,5 @@
   "remoteEnv": {
     "PATH": "/home/vscode/.venv/bin:/home/vscode/.local/bin:${containerEnv:PATH}"
   },
-  "postCreateCommand": "bash .devcontainer/postCreate.sh",
-  "postStartCommand": "bash \"$HOME/.dotfiles-src/devcontainer-sync.sh\""
+  "postCreateCommand": "bash .devcontainer/postCreate.sh"
 }
