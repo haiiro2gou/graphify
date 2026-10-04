@@ -12,6 +12,17 @@ from graphify.extractors.base import _make_id
 _CALL_RE = re.compile(r"(?<!\S)(?:(?P<schedule>schedule)\s+)?function\s+(?P<ref>\S+)")
 _RESOURCE_RE = re.compile(r"(?:[a-z0-9_.-]+:)?[a-z0-9_./-]+")
 
+_CMD_RE = re.compile(
+    r'(?<![\w:./$("-])(?P<item>(?:[a-z0-9_.-]+:)?[a-z0-9_./-]+)'
+    r'\{[^}\n]*?\bCustomModelData\s*:\s*(?P<number>-?\d+)(?![\w.])'
+)
+_CMD_ID_RE = re.compile(
+    r'\bid\s*:\s*"(?P<item>[^"]+)"(?:(?!\bid\s*:)[^}\n])*?'
+    r'\bCustomModelData\s*:\s*(?P<number>-?\d+)(?![\w.])'
+)
+_PLAYSOUND_RE = re.compile(r"(?<!\S)playsound\s+(?P<ref>\S+)")
+_FONT_RE = re.compile(r'"font"\s*:\s*"(?P<ref>[^"]+)"')
+
 
 def _resource_id(kind: str, name: str) -> str:
     """Node ID for a function or tag resource name.
@@ -89,16 +100,24 @@ def extract_mcfunction(path: Path) -> dict:
                 "source_file": str_path, "source_location": "L1",
             })
 
-    def add_edge(reference: str, line: int, context: str) -> None:
-        target = _reference_id(reference)
+    def add_edge(reference: str, line: int, context: str, kind: str | None = None) -> None:
+        if kind:
+            name, separator, number = reference.partition("#")
+            if "$(" in name or not _RESOURCE_RE.fullmatch(name):
+                return
+            name = name if ":" in name else f"minecraft:{name}"
+            target = _resource_id(kind, name + separator + number)
+        else:
+            target = _reference_id(reference)
+        relation = "references" if kind else "calls"
         if not target or target == file_nid:
             return
-        key = (file_nid, target, "calls")
+        key = (file_nid, target, relation)
         if key in seen_edges:
             return
         seen_edges.add(key)
         edges.append({
-            "source": file_nid, "target": target, "relation": "calls",
+            "source": file_nid, "target": target, "relation": relation,
             "confidence": "EXTRACTED", "source_file": str_path,
             "source_location": f"L{line}", "weight": 1.0, "context": context,
         })
@@ -136,6 +155,16 @@ def extract_mcfunction(path: Path) -> dict:
                 for match in _CALL_RE.finditer(command):
                     context = "schedule" if match.group("schedule") else "call"
                     add_edge(match.group("ref"), line, context)
+                for pattern in (_CMD_RE, _CMD_ID_RE):
+                    for match in pattern.finditer(command):
+                        item = match.group("item")
+                        if pattern is _CMD_RE and item in {"tag", "Item", "item", "display"}:
+                            continue
+                        add_edge(f"{item}#{match.group('number')}", line, "custom_model_data", "rp_cmd")
+                for match in _PLAYSOUND_RE.finditer(command):
+                    add_edge(match.group("ref"), line, "playsound", "rp_sound")
+                for match in _FONT_RE.finditer(command):
+                    add_edge(match.group("ref"), line, "font", "rp_font")
     except (OSError, ValueError) as error:
         return {"nodes": nodes, "edges": edges, "error": str(error)}
     return {"nodes": nodes, "edges": edges}
