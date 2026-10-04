@@ -221,3 +221,68 @@ def test_same_tag_in_two_packs_is_one_node(tmp_path: Path):
     pairs = {(e["source"], e["target"]) for e in result["edges"]}
     assert (_resource_id("mcfunction", "ns:run"), tag_id) in pairs
     assert {(tag_id, _resource_id("mcfunction", f"ns:{pack}")) for pack in ("a", "b")} <= pairs
+
+
+@pytest.mark.parametrize(("command", "kind", "name", "context"), [
+    ("give @s stick{CustomModelData:1}", "rp_cmd", "minecraft:stick#1", "custom_model_data"),
+    ('summon item ~ ~ ~ {Item:{id:"minecraft:stick",Count:1b,tag:{CustomModelData:2}}}',
+     "rp_cmd", "minecraft:stick#2", "custom_model_data"),
+    ("playsound tsb_sounds:blaster1 master @s", "rp_sound", "tsb_sounds:blaster1", "playsound"),
+    ('tellraw @s {"text":"hi","font":"misaki/gothic"}', "rp_font", "minecraft:misaki/gothic", "font"),
+    ("$give @s demo:stick{tag:{CustomModelData:1},x:$(value)}",
+     "rp_cmd", "demo:stick#1", "custom_model_data"),
+])
+def test_resourcepack_references(tmp_path: Path, command: str, kind: str, name: str, context: str):
+    path = _write(tmp_path, "data/demo/function/start.mcfunction", "\n" + command)
+    result = extract_mcfunction(path)
+    assert len(result["nodes"]) == 1
+    assert result["edges"] == [{
+        "source": result["nodes"][0]["id"], "target": _resource_id(kind, name),
+        "relation": "references", "confidence": "EXTRACTED", "weight": 1.0,
+        "source_file": str(path), "source_location": "L2", "context": context,
+    }]
+
+
+@pytest.mark.parametrize("command", [
+    "data modify entity @s CustomModelData set value 3",
+    "give @s stick{} tag:{CustomModelData:1}",
+    "data merge entity @s {Item:{tag:{CustomModelData:2}}}",
+    "tag{CustomModelData:1}", "item{CustomModelData:1}", "display{CustomModelData:1}",
+    'summon item ~ ~ ~ {id:"stick"} {CustomModelData:2}',
+    "$playsound demo:$(sound) master @s",
+    '$tellraw @s {"font":"$(font)"}',
+    "$give @s demo:$(item){CustomModelData:1}",
+    "# playsound demo:ignored master @s",
+])
+def test_skips_unknown_or_dynamic_resourcepack_targets(tmp_path: Path, command: str):
+    path = _write(tmp_path, "data/demo/function/start.mcfunction", command)
+    assert extract_mcfunction(path)["edges"] == []
+
+
+def test_resourcepack_links_survive_merging(tmp_path: Path):
+    from graphify.extract import extract
+
+    function = _write(tmp_path, "data/demo/function/start.mcfunction",
+                      "give @s stick{CustomModelData:1}\nplaysound demo:blast master @s\n"
+                      'tellraw @s {"font":"demo:ui"}')
+    model = _write(tmp_path, "assets/demo/models/item/stick.json", json.dumps({
+        "overrides": [{"predicate": {"custom_model_data": 1}, "model": "demo:item/custom"}],
+    }))
+    target = _write(tmp_path, "assets/demo/models/item/custom.json", '{"parent":"item/generated"}')
+    sounds = _write(tmp_path, "assets/demo/sounds.json", '{"blast":{"sounds":["demo:blast"]}}')
+    font = _write(tmp_path, "assets/demo/font/ui.json", '{"providers":[]}')
+    result = extract([function, model, target, sounds, font])
+    source = _resource_id("mcfunction", "demo:start")
+    assert {e["target"] for e in result["edges"] if e["source"] == source} == {
+        _resource_id("rp_cmd", "minecraft:stick#1"),
+        _resource_id("rp_sound", "demo:blast"), _resource_id("rp_font", "demo:ui"),
+    }
+    assert sum(n["id"] == _resource_id("rp_model", "demo:item/custom") for n in result["nodes"]) == 1
+
+
+def test_custom_model_data_uses_innermost_item_id(tmp_path: Path):
+    path = _write(tmp_path, "data/demo/function/spawn.mcfunction",
+                  'summon pig ~ ~ ~ {Passengers:[{id:"minecraft:item_display",'
+                  'item:{id:"minecraft:stick",Count:1b,tag:{CustomModelData:7}}}]}\n')
+    targets = {edge["target"] for edge in extract_mcfunction(path)["edges"]}
+    assert targets == {_resource_id("rp_cmd", "minecraft:stick#7")}
